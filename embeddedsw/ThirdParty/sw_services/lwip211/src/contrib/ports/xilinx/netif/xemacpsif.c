@@ -558,6 +558,15 @@ static u8_t xemacpsif_ip6_addr_ismulticast(const ip6_addr_t* ip_addr)
 	}
 }
 
+#ifdef __rtems__
+/*
+ * How long to wait for the transmit ring to drain before giving up.  Large
+ * enough that an ordinary drain always wins, small enough that a stuck ring
+ * costs a pause rather than the machine.
+ */
+#define XEMACPSIF_HWCNT_WAIT_MAX 1000000u
+#endif /* __rtems__ */
+
 static void xemacpsif_mld6_mac_hash_update (struct netif *netif, u8_t *ip_addr,
 #ifndef __rtems__
 		u8_t action)
@@ -579,7 +588,31 @@ static void xemacpsif_mld6_mac_hash_update (struct netif *netif, u8_t *ip_addr,
 	multicast_mac_addr[5] = ip_addr[15];
 
 	/* Wait till all sent packets are acknowledged from HW */
+#ifndef __rtems__
 	while(txring->HwCnt);
+#else /* __rtems__ */
+	/*
+	 * Bounded, because unbounded is a hang.  Joining a multicast group --
+	 * which is what mDNS does as its first act -- reaches here while
+	 * descriptors queued by IPv6 duplicate address detection are still
+	 * outstanding, and if the transmit-done interrupt does not retire them
+	 * the loop never ends and the caller never returns.  Observed on
+	 * arm/xilinx_zynq_a9_qemu: mdns_resp_add_netif() never returns, with the
+	 * CPU spinning here.
+	 *
+	 * Giving up and continuing is the right failure.  What follows stops the
+	 * MAC, rewrites the hash register and restarts it, so a descriptor that
+	 * has not retired is one packet lost on a link that has only just come
+	 * up -- against a driver that never returns to its caller.
+	 */
+	{
+		unsigned int spins = XEMACPSIF_HWCNT_WAIT_MAX;
+
+		while (txring->HwCnt != 0 && spins != 0) {
+			--spins;
+		}
+	}
+#endif /* __rtems__ */
 
 	SYS_ARCH_DECL_PROTECT(lev);
 
@@ -710,7 +743,31 @@ static void xemacpsif_mac_hash_update (struct netif *netif, u8_t *ip_addr,
 	multicast_mac_addr[5] = ip_addr[3];
 
 	/* Wait till all sent packets are acknowledged from HW */
+#ifndef __rtems__
 	while(txring->HwCnt);
+#else /* __rtems__ */
+	/*
+	 * Bounded, because unbounded is a hang.  Joining a multicast group --
+	 * which is what mDNS does as its first act -- reaches here while
+	 * descriptors queued by IPv6 duplicate address detection are still
+	 * outstanding, and if the transmit-done interrupt does not retire them
+	 * the loop never ends and the caller never returns.  Observed on
+	 * arm/xilinx_zynq_a9_qemu: mdns_resp_add_netif() never returns, with the
+	 * CPU spinning here.
+	 *
+	 * Giving up and continuing is the right failure.  What follows stops the
+	 * MAC, rewrites the hash register and restarts it, so a descriptor that
+	 * has not retired is one packet lost on a link that has only just come
+	 * up -- against a driver that never returns to its caller.
+	 */
+	{
+		unsigned int spins = XEMACPSIF_HWCNT_WAIT_MAX;
+
+		while (txring->HwCnt != 0 && spins != 0) {
+			--spins;
+		}
+	}
+#endif /* __rtems__ */
 
 	SYS_ARCH_DECL_PROTECT(lev);
 
