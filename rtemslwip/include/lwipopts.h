@@ -280,4 +280,41 @@
 #define UDP_TTL 255
 #endif
 
+/*
+ * Multicast DNS.
+ *
+ * The responder is available -- its sources are imported -- but off, which is
+ * lwip's own default.  Turning it on here would change behaviour for every
+ * existing user of this library, and on at least one BSP it would break them:
+ * joining a multicast group goes through the Xilinx port's MAC filter update,
+ * which stops the MAC, resets the DMA and restarts, and on
+ * arm/xilinx_zynq_a9_qemu the interface does not transmit again afterwards.
+ *
+ * So this only arranges that a BSP or application which *does* define
+ * LWIP_MDNS_RESPONDER gets the four options mdns.c requires, rather than the
+ * three #errors and one silent misconfiguration it would otherwise meet.
+ */
+#if LWIP_MDNS_RESPONDER
+
+/* mdns.c #errors without IPv4 multicast. */
+#ifndef LWIP_IGMP
+#define LWIP_IGMP 1
+#endif
+
+/* The responder keeps its per-netif state in a client-data slot. */
+#ifndef LWIP_NUM_NETIF_CLIENT_DATA
+#define LWIP_NUM_NETIF_CLIENT_DATA 1
+#endif
+
+/*
+ * The responder takes a timeout of its own, which the default -- computed
+ * from the enabled protocols -- does not account for.  mdns.c says so in its
+ * own header comment.
+ */
+#ifndef MEMP_NUM_SYS_TIMEOUT
+#define MEMP_NUM_SYS_TIMEOUT (LWIP_NUM_SYS_TIMEOUT_INTERNAL + 1)
+#endif
+
+#endif /* LWIP_MDNS_RESPONDER */
+
 #endif /* __LWIPOPTS_H__ */
