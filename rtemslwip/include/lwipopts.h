@@ -311,6 +311,26 @@
  * MEMP_NUM_SYS_TIMEOUT being too small is not the cause of the probe loop --
  * eight extra slots changes nothing.
  */
+/*
+ * On, which is not lwip's default.  It has to be decided here: liblwip.a is
+ * built once and installed, so an application cannot turn a compile-time
+ * option on afterwards.  Making it selectable properly wants a build option
+ * rather than a define, which is worth doing and is not done.
+ *
+ * Both reasons it was previously off have gone.  The Xilinx driver no longer
+ * loses its transmit path on a multicast join, and the responder no longer
+ * probes forever -- see the two commits before this one.  It now sends three
+ * probes and two announcements and then goes quiet, which is what RFC 6762
+ * asks for.
+ *
+ * It costs about 29 KiB of flash, and it turns LWIP_IGMP on for everyone,
+ * since mdns.c requires IPv4 multicast.  Define LWIP_MDNS_RESPONDER to 0
+ * before this header to decline both.
+ */
+#ifndef LWIP_MDNS_RESPONDER
+#define LWIP_MDNS_RESPONDER 1
+#endif
+
 #if LWIP_MDNS_RESPONDER
 
 /* mdns.c #errors without IPv4 multicast. */
@@ -324,12 +344,21 @@
 #endif
 
 /*
- * The responder takes a timeout of its own, which the default -- computed
- * from the enabled protocols -- does not account for.  mdns.c says so in its
- * own header comment.
+ * The responder needs eight timeouts of its own, not the one its header
+ * comment suggests, and the difference is not academic: sys_timeout() drops
+ * the request silently when the pool is full, so the shortfall showed up as
+ * the second announcement never being sent.
+ *
+ * Where eight comes from.  mdns_resp_announce() calls
+ * mdns_start_multicast_timeouts_ipv4() and _ipv6(), and each starts three --
+ * the multicast timeout, the multicast probe timeout and the one at a quarter
+ * of the TTL -- so six are live at once on a dual-stack build, and they are
+ * started whether or not that family has an address.  Add one for the
+ * probe-and-announce state machine itself, and one for
+ * mdns_handle_tc_question(), which is transient but overlaps them.
  */
 #ifndef MEMP_NUM_SYS_TIMEOUT
-#define MEMP_NUM_SYS_TIMEOUT (LWIP_NUM_SYS_TIMEOUT_INTERNAL + 1)
+#define MEMP_NUM_SYS_TIMEOUT (LWIP_NUM_SYS_TIMEOUT_INTERNAL + 8)
 #endif
 
 #endif /* LWIP_MDNS_RESPONDER */
