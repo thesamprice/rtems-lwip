@@ -633,10 +633,33 @@ static void xemacpsif_mld6_mac_hash_update (struct netif *netif, u8_t *ip_addr,
 	/* Reset DMA */
 	reset_dma(xemac);
 
+#ifndef __rtems__
 	/* Start Ethernet */
 	XEmacPs_Start(&xemacpsif->emacps);
 
 	SYS_ARCH_UNPROTECT(lev);
+#else /* __rtems__ */
+	SYS_ARCH_UNPROTECT(lev);
+
+	/*
+	 * reset_dma() emptied both rings.  The pbufs those descriptors referred
+	 * to are still allocated and still recorded in tx_pbufs_storage[] and
+	 * rx_pbufs_storage[], so release them and give the hardware a fresh set
+	 * of receive descriptors before it is restarted -- an empty receive ring
+	 * would drop every frame until something else happened to refill it.
+	 *
+	 * Outside the protected section deliberately: setup_rx_bds() allocates,
+	 * and allocating with interrupts disabled is its own bug.  The MAC is
+	 * stopped here, so neither the ring nor the hardware is moving.
+	 */
+	free_txrx_pbufs(xemacpsif);
+	setup_rx_bds(xemacpsif, &XEmacPs_GetRxRing(&xemacpsif->emacps));
+
+	SYS_ARCH_PROTECT(lev);
+	/* Start Ethernet */
+	XEmacPs_Start(&xemacpsif->emacps);
+	SYS_ARCH_UNPROTECT(lev);
+#endif /* __rtems__ */
 }
 
 #ifndef __rtems__
@@ -788,10 +811,33 @@ static void xemacpsif_mac_hash_update (struct netif *netif, u8_t *ip_addr,
 	/* Reset DMA */
 	reset_dma(xemac);
 
+#ifndef __rtems__
 	/* Start Ethernet */
 	XEmacPs_Start(&xemacpsif->emacps);
 
 	SYS_ARCH_UNPROTECT(lev);
+#else /* __rtems__ */
+	SYS_ARCH_UNPROTECT(lev);
+
+	/*
+	 * reset_dma() emptied both rings.  The pbufs those descriptors referred
+	 * to are still allocated and still recorded in tx_pbufs_storage[] and
+	 * rx_pbufs_storage[], so release them and give the hardware a fresh set
+	 * of receive descriptors before it is restarted -- an empty receive ring
+	 * would drop every frame until something else happened to refill it.
+	 *
+	 * Outside the protected section deliberately: setup_rx_bds() allocates,
+	 * and allocating with interrupts disabled is its own bug.  The MAC is
+	 * stopped here, so neither the ring nor the hardware is moving.
+	 */
+	free_txrx_pbufs(xemacpsif);
+	setup_rx_bds(xemacpsif, &XEmacPs_GetRxRing(&xemacpsif->emacps));
+
+	SYS_ARCH_PROTECT(lev);
+	/* Start Ethernet */
+	XEmacPs_Start(&xemacpsif->emacps);
+	SYS_ARCH_UNPROTECT(lev);
+#endif /* __rtems__ */
 }
 
 #ifndef __rtems__
