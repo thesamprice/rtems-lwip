@@ -1060,6 +1060,32 @@ void reset_dma(struct xemac_s *xemac)
 
 	XEmacPs_BdRingPtrReset(txringptr, xemacpsif->tx_bdspace);
 	XEmacPs_BdRingPtrReset(rxringptr, xemacpsif->rx_bdspace);
+#ifdef __rtems__
+	/*
+	 * XEmacPs_BdRingPtrReset() moves the five ring pointers back to the base
+	 * and leaves the four counters alone.  On return the ring therefore says
+	 * that every descriptor is at index 0, while still claiming that N of
+	 * them are owned by the hardware and missing from the free list.
+	 * XEmacPs_BdRingAlloc() then hands out the descriptors that
+	 * XEmacPs_BdRingFromHw() is trying to retire, and the interface stops
+	 * transmitting for good -- including traffic that has nothing to do with
+	 * whatever prompted the reset.
+	 *
+	 * Put the counts back to what XEmacPs_BdRingCreate() leaves them at.
+	 * Both rings are empty afterwards, so the caller owns the buffers the
+	 * discarded descriptors referred to: it has to release them and re-post
+	 * the receive ring before restarting the MAC.
+	 */
+	txringptr->FreeCnt = txringptr->AllCnt;
+	txringptr->PreCnt = 0;
+	txringptr->HwCnt = 0;
+	txringptr->PostCnt = 0;
+
+	rxringptr->FreeCnt = rxringptr->AllCnt;
+	rxringptr->PreCnt = 0;
+	rxringptr->HwCnt = 0;
+	rxringptr->PostCnt = 0;
+#endif /* __rtems__ */
 
 	gigeversion = ((Xil_In32(xemacpsif->emacps.Config.BaseAddress + 0xFC)) >> 16) & 0xFFF;
 	if (gigeversion > 2) {
