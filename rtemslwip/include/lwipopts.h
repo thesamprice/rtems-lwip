@@ -283,16 +283,33 @@
 /*
  * Multicast DNS.
  *
- * The responder is available -- its sources are imported -- but off, which is
- * lwip's own default.  Turning it on here would change behaviour for every
- * existing user of this library, and on at least one BSP it would break them:
- * joining a multicast group goes through the Xilinx port's MAC filter update,
- * which stops the MAC, resets the DMA and restarts, and on
- * arm/xilinx_zynq_a9_qemu the interface does not transmit again afterwards.
+ * The responder is available -- its sources are imported and compiled -- but
+ * off, which is lwip's own default.  Two things about that are worth knowing,
+ * because the obvious next step is to turn it on and both bear on whether to.
  *
- * So this only arranges that a BSP or application which *does* define
+ * The original reason for leaving it off has gone.  Joining a multicast group
+ * goes through the Xilinx port's MAC filter update, and on
+ * arm/xilinx_zynq_a9_qemu the interface did not transmit again afterwards, so
+ * enabling this would have broken every user of that BSP.  That defect is
+ * fixed in the two commits before this one.
+ *
+ * What replaces it: with the responder enabled, mdns_resp_add_netif() and
+ * mdns_resp_announce() both succeed and correctly formed packets do reach the
+ * wire -- 299 of them to 224.0.0.251:5353 in one measured run -- but every one
+ * is a probe.  The responder never finishes probing and never announces, so it
+ * emits at roughly 23 packets per second for as long as it runs.  Defaulting
+ * that on would give every user of this library a packet storm.
+ *
+ * Note also that this is a decision for whoever builds the library, not for an
+ * application: liblwip.a is built once and installed, so an application cannot
+ * turn a compile-time option on afterwards.  Making it selectable wants a
+ * build option rather than a define here.
+ *
+ * The block below only arranges that a build which *does* define
  * LWIP_MDNS_RESPONDER gets the four options mdns.c requires, rather than the
  * three #errors and one silent misconfiguration it would otherwise meet.
+ * MEMP_NUM_SYS_TIMEOUT being too small is not the cause of the probe loop --
+ * eight extra slots changes nothing.
  */
 #if LWIP_MDNS_RESPONDER
 
