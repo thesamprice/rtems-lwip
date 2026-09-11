@@ -2295,37 +2295,34 @@ mdns_probe_and_announce(void* arg)
     case MDNS_STATE_PROBE_WAIT:
     case MDNS_STATE_PROBING:
     {
-      int v4_wanted = 0, v4_sent = 0;
-      int v6_wanted = 0, v6_sent = 0;
+      int probe_ok = 1;
+      int probe_sent = 0;
+
 #if LWIP_IPV4
-      /*if ipv4 wait with probing until address is set*/
       if (!ip4_addr_isany_val(*netif_ip4_addr(netif))) {
-        v4_wanted = 1;
-        v4_sent = (mdns_send_probe(netif, &v4group) == ERR_OK);
+        probe_sent = 1;
+        if (mdns_send_probe(netif, &v4group) != ERR_OK) {
+          probe_ok = 0;
+        }
       }
 #endif
+
 #if LWIP_IPV6
       {
         int i;
-        /* Only probe over IPv6 once the interface has an address to probe
-           from.  Without this the probe returns ERR_RTE on an IPv4-only
-           configuration of a dual-stack build, and since a probe used to count
-           only when both families went out, sent_num never advanced: the
-           responder probed forever and never announced. */
         for (i = 0; i < LWIP_IPV6_NUM_ADDRESSES; i++) {
           if (ip6_addr_isvalid(netif_ip6_addr_state(netif, i))) {
-            v6_wanted = 1;
+            probe_sent = 1;
+            if (mdns_send_probe(netif, &v6group) != ERR_OK) {
+              probe_ok = 0;
+            }
             break;
           }
         }
-        if (v6_wanted) {
-          v6_sent = (mdns_send_probe(netif, &v6group) == ERR_OK);
-        }
       }
 #endif
-      /* A probe counts when every family the interface actually has an address
-         for went out -- and at least one did. */
-      if ((v4_wanted || v6_wanted) && v4_wanted == v4_sent && v6_wanted == v6_sent) {
+
+      if (probe_sent && probe_ok) {
         mdns->state = MDNS_STATE_PROBING;
         mdns->sent_num++;
       }
