@@ -1,0 +1,8 @@
+{
+	"header-paths-to-import": [
+		"rtemslwip/esp32c3"
+	],
+	"source-files-to-import": [
+		"rtemslwip/esp32c3/netstart.c"
+	]
+}
