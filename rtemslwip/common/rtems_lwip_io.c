@@ -174,6 +174,10 @@ int socket(
   lwipfd = lwip_socket( domain, type, protocol );
 
   if ( lwipfd < 0 ) {
+    /* The mutex is recursive, so leaving it held here does not deadlock this
+     * task -- it deadlocks the next one, somewhere else entirely. */
+    rtems_lwip_semaphore_release();
+
     return -1;
   }
 
@@ -345,6 +349,19 @@ int accept(
   }
 
   lwipfd = lwip_accept( lwipfd, name, namelen );
+
+  if ( lwipfd < 0 ) {
+    /*
+     * Nothing was accepted.  On a non-blocking listener that is the ordinary
+     * case, not an error, and it must be reported as one -- without this the
+     * descriptor built below carries data0 = -1, which every later call reads
+     * back and returns -1 from without setting errno, and a caller polling an
+     * idle listener allocates a fresh descriptor on every poll.
+     *
+     * errno is already set by lwip_accept.
+     */
+    return -1;
+  }
 
   rtems_lwip_semaphore_obtain();
   ret = rtems_lwip_make_sysfd_from_lwipfd( lwipfd );
