@@ -18,9 +18,19 @@
  * defined for it -- so there is no configuration in which the defaults fit.
  * The 4 MiB of SPI flash does not help: these are all live buffers.
  *
- * The numbers below are a starting point derived from the part, not from
- * measured traffic.  They should be revisited against a real workload; what
- * matters for now is that each says what it is paying for.
+ * The two largest items are sized against what they cost in .bss rather than
+ * against a guess, because on this part the whole margin is 14 KiB and a
+ * static buffer is taken from the same 272 KiB the WiFi libraries allocate
+ * from.  rtems-esphome#121 has the measurement.  Two identities are worth
+ * having in front of you before changing a number here, both confirmed
+ * against riscv-rtems7-nm on the built liblwip.a:
+ *
+ *   memp_memory_PBUF_POOL_base = PBUF_POOL_SIZE * ( sizeof( struct pbuf )
+ *                                                   + PBUF_POOL_BUFSIZE )
+ *   ram_heap                   = MEM_SIZE + 2 * sizeof( struct mem )
+ *
+ * sizeof( struct pbuf ) is 16 and sizeof( struct mem ) is 6 here; MEM_ALIGNMENT
+ * is lwIP's default of 1, so neither expression carries any rounding.
  */
 
 #ifndef RTEMSLWIP_ESP32C3_LWIPBSPOPTS_H
@@ -30,19 +40,50 @@
  * The receive pool.  This is the largest single item and the one that decides
  * how many frames can be in flight before the driver starts dropping.
  *
- * 1600 covers a 1500-byte MTU plus the Ethernet header and alignment, which is
- * what the WiFi driver hands up; 24 of them is 37.5 KiB.  The WiFi libraries
- * have their own RX buffers in front of this -- CONFIG_ESP_WIFI_*_RX_BUFFER_NUM
- * in the port's sdkconfig.h -- so this pool is the second queue, not the first.
+ * A buffer has to hold one whole frame, because rtems_esp_netif_input() asks
+ * for pbuf_alloc( PBUF_RAW, len, PBUF_POOL ) and a len larger than this is
+ * answered with a chain rather than a refusal -- which works, and quietly
+ * costs two pool entries per frame.  RTEMS_ESP_NETIF_FRAME_MAX is 1518 and
+ * the netif's MTU is 1500, so 1520 is that frame rounded up to 16.  The 1600
+ * it replaces was never a frame size; it was the rtems-lwip default.
+ *
+ * Twelve of them is 18 KiB.  What has to fit at once is a full TCP receive
+ * window -- TCP_WND below is four segments -- plus whatever is queued in the
+ * tcpip mailbox behind it, so twelve is about three times the depth a single
+ * station can put in flight.  The WiFi libraries have their own RX buffers in
+ * front of this -- CONFIG_ESP_WIFI_*_RX_BUFFER_NUM in the port's sdkconfig.h
+ * -- so this pool is the second queue, not the first.
+ *
+ * A pool that is too small does not report an error.  It drops frames, and
+ * the radio goes quiet under load.  lwIP counts both ends of that for us:
+ * lwip_stats.memp[ MEMP_PBUF_POOL ]->err is the refusal count and ->max the
+ * high-water mark, and MEMP_STATS is on by default.  Check them, not the
+ * absence of a complaint, before changing this number again.
  */
-#define PBUF_POOL_SIZE     24
-#define PBUF_POOL_BUFSIZE  1600
+#define PBUF_POOL_SIZE     12
+#define PBUF_POOL_BUFSIZE  1520
 
 /*
- * The heap lwIP allocates transmit buffers and netbufs from.  32 KiB against
+ * The heap lwIP allocates transmit buffers and netbufs from.  16 KiB against
  * the 2 MiB default.
+ *
+ * It holds unacknowledged transmit data and nothing else that is large: one
+ * connection's TCP_SND_BUF is four segments, so about 7 KiB of pbufs with
+ * their headers, and DHCP, DNS and the mDNS responder each hold one packet at
+ * a time.  16 KiB is roughly twice that, and lwip_stats.mem.max says on any
+ * run how much of it was ever used.
+ *
+ * MEM_LIBC_MALLOC is deliberately left off.  Turning it on would delete this
+ * buffer entirely and hand lwIP the RTEMS heap instead, which is 16 KiB more
+ * for everyone and one pool to run out of rather than two.  The reason not to
+ * is what runs out of the other one: the WiFi libraries answer ESP_ERR_NO_MEM
+ * by scanning zero networks, so a shared heap turns an lwIP burst into a radio
+ * that appears dead.  The wall between them is what makes "which heap ran out"
+ * answerable at all today.  Revisit it once lwip_stats.mem.max has been read
+ * off a real workload; note that it would not shrink the pools above, which
+ * stay static unless MEMP_MEM_MALLOC is also set.
  */
-#define MEM_SIZE           ( 32 * 1024 )
+#define MEM_SIZE           ( 16 * 1024 )
 
 /*
  * The pools, scaled to a part that will hold a handful of connections rather
